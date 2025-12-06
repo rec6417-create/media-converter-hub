@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Music, Download, Loader2 } from "lucide-react";
+import { Music, Download, Loader2, CheckCircle } from "lucide-react";
 import ConverterLayout from "./ConverterLayout";
 import FileDropzone from "./FileDropzone";
 import FormatSelector from "./FormatSelector";
@@ -13,45 +13,66 @@ interface AudioConverterProps {
 
 const audioFormats = ["MP3", "WAV", "FLAC", "AAC", "OGG", "M4A", "WMA", "AIFF"];
 
+interface FileProgress {
+  file: File;
+  progress: number;
+  status: "pending" | "converting" | "done";
+}
+
 const AudioConverter = ({ onClose }: AudioConverterProps) => {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [outputFormat, setOutputFormat] = useState("MP3");
   const [isConverting, setIsConverting] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [fileProgress, setFileProgress] = useState<FileProgress[]>([]);
+
+  const handleFilesSelect = (newFiles: File[]) => {
+    setFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleConvert = async () => {
-    if (!file) {
+    if (files.length === 0) {
       toast({
         title: "შეცდომა",
-        description: "გთხოვთ აირჩიოთ ფაილი",
+        description: "გთხოვთ აირჩიოთ ფაილები",
         variant: "destructive",
       });
       return;
     }
 
     setIsConverting(true);
-    setProgress(0);
+    setFileProgress(files.map(file => ({ file, progress: 0, status: "pending" })));
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return prev + 15;
-      });
-    }, 400);
+    for (let i = 0; i < files.length; i++) {
+      setFileProgress(prev => prev.map((fp, idx) => 
+        idx === i ? { ...fp, status: "converting" } : fp
+      ));
 
-    setTimeout(() => {
-      clearInterval(interval);
-      setProgress(100);
-      setIsConverting(false);
-      toast({
-        title: "წარმატება!",
-        description: `აუდიო გადაქცეულია ${outputFormat} ფორმატში`,
-      });
-    }, 3000);
+      for (let p = 0; p <= 100; p += 25) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        setFileProgress(prev => prev.map((fp, idx) => 
+          idx === i ? { ...fp, progress: p } : fp
+        ));
+      }
+
+      setFileProgress(prev => prev.map((fp, idx) => 
+        idx === i ? { ...fp, progress: 100, status: "done" } : fp
+      ));
+    }
+
+    setIsConverting(false);
+    toast({
+      title: "წარმატება!",
+      description: `${files.length} აუდიო გადაქცეულია ${outputFormat} ფორმატში`,
+    });
   };
+
+  const overallProgress = fileProgress.length > 0
+    ? Math.round(fileProgress.reduce((sum, fp) => sum + fp.progress, 0) / fileProgress.length)
+    : 0;
 
   return (
     <ConverterLayout
@@ -63,9 +84,11 @@ const AudioConverter = ({ onClose }: AudioConverterProps) => {
       <div className="space-y-6">
         <FileDropzone
           accept="audio/*"
-          onFileSelect={setFile}
-          selectedFile={file}
-          onClear={() => setFile(null)}
+          onFileSelect={handleFilesSelect}
+          selectedFiles={files}
+          onClear={() => setFiles([])}
+          onRemoveFile={handleRemoveFile}
+          multiple={true}
         />
 
         <FormatSelector
@@ -75,13 +98,29 @@ const AudioConverter = ({ onClose }: AudioConverterProps) => {
           onChange={setOutputFormat}
         />
 
-        {isConverting && (
-          <div className="space-y-2">
+        {isConverting && fileProgress.length > 0 && (
+          <div className="space-y-3">
             <div className="flex justify-between text-sm">
-              <span>კონვერტაცია მიმდინარეობს...</span>
-              <span>{progress}%</span>
+              <span>საერთო პროგრესი</span>
+              <span>{overallProgress}%</span>
             </div>
-            <Progress value={progress} className="h-2" />
+            <Progress value={overallProgress} className="h-2" />
+            
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {fileProgress.map((fp, index) => (
+                <div key={index} className="flex items-center gap-3 text-sm">
+                  {fp.status === "done" ? (
+                    <CheckCircle className="w-4 h-4 text-green-500" />
+                  ) : fp.status === "converting" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border border-muted-foreground" />
+                  )}
+                  <span className="truncate flex-1">{fp.file.name}</span>
+                  <span className="text-muted-foreground">{fp.progress}%</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -90,17 +129,17 @@ const AudioConverter = ({ onClose }: AudioConverterProps) => {
           size="lg"
           className="w-full"
           onClick={handleConvert}
-          disabled={!file || isConverting}
+          disabled={files.length === 0 || isConverting}
         >
           {isConverting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              კონვერტაცია...
+              კონვერტაცია... ({overallProgress}%)
             </>
           ) : (
             <>
               <Download className="w-4 h-4" />
-              კონვერტაცია და გადმოწერა
+              {files.length > 0 ? `${files.length} ფაილის კონვერტაცია` : "კონვერტაცია და გადმოწერა"}
             </>
           )}
         </Button>
