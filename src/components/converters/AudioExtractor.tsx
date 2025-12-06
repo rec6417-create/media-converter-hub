@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Scissors, Download, Loader2 } from "lucide-react";
+import { Scissors, Download, Loader2, CheckCircle } from "lucide-react";
 import ConverterLayout from "./ConverterLayout";
 import FileDropzone from "./FileDropzone";
 import FormatSelector from "./FormatSelector";
@@ -13,59 +13,82 @@ interface AudioExtractorProps {
 
 const audioFormats = ["MP3", "WAV", "AAC", "FLAC", "OGG", "M4A"];
 
+interface FileProgress {
+  file: File;
+  progress: number;
+  status: "pending" | "extracting" | "done";
+}
+
 const AudioExtractor = ({ onClose }: AudioExtractorProps) => {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [outputFormat, setOutputFormat] = useState("MP3");
   const [isExtracting, setIsExtracting] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [fileProgress, setFileProgress] = useState<FileProgress[]>([]);
+
+  const handleFilesSelect = (newFiles: File[]) => {
+    setFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleExtract = async () => {
-    if (!file) {
+    if (files.length === 0) {
       toast({
         title: "შეცდომა",
-        description: "გთხოვთ აირჩიოთ ვიდეო ფაილი",
+        description: "გთხოვთ აირჩიოთ ვიდეო ფაილები",
         variant: "destructive",
       });
       return;
     }
 
     setIsExtracting(true);
-    setProgress(0);
+    setFileProgress(files.map(file => ({ file, progress: 0, status: "pending" })));
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return prev + 8;
-      });
-    }, 400);
+    for (let i = 0; i < files.length; i++) {
+      setFileProgress(prev => prev.map((fp, idx) => 
+        idx === i ? { ...fp, status: "extracting" } : fp
+      ));
 
-    setTimeout(() => {
-      clearInterval(interval);
-      setProgress(100);
-      setIsExtracting(false);
-      toast({
-        title: "წარმატება!",
-        description: `აუდიო ამოღებულია ${outputFormat} ფორმატში`,
-      });
-    }, 5000);
+      for (let p = 0; p <= 100; p += 20) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        setFileProgress(prev => prev.map((fp, idx) => 
+          idx === i ? { ...fp, progress: p } : fp
+        ));
+      }
+
+      setFileProgress(prev => prev.map((fp, idx) => 
+        idx === i ? { ...fp, progress: 100, status: "done" } : fp
+      ));
+    }
+
+    setIsExtracting(false);
+    toast({
+      title: "წარმატება!",
+      description: `${files.length} ვიდეოდან ამოღებულია აუდიო ${outputFormat} ფორმატში`,
+    });
   };
+
+  const overallProgress = fileProgress.length > 0
+    ? Math.round(fileProgress.reduce((sum, fp) => sum + fp.progress, 0) / fileProgress.length)
+    : 0;
 
   return (
     <ConverterLayout
       icon={Scissors}
       title="აუდიოს ამოღება"
-      description="ამოიღე აუდიო ტრეკი ვიდეო ფაილიდან"
+      description="ამოიღე აუდიო ტრეკი ვიდეო ფაილებიდან"
       onClose={onClose}
     >
       <div className="space-y-6">
         <FileDropzone
           accept="video/*"
-          onFileSelect={setFile}
-          selectedFile={file}
-          onClear={() => setFile(null)}
+          onFileSelect={handleFilesSelect}
+          selectedFiles={files}
+          onClear={() => setFiles([])}
+          onRemoveFile={handleRemoveFile}
+          multiple={true}
         />
 
         <FormatSelector
@@ -75,13 +98,29 @@ const AudioExtractor = ({ onClose }: AudioExtractorProps) => {
           onChange={setOutputFormat}
         />
 
-        {isExtracting && (
-          <div className="space-y-2">
+        {isExtracting && fileProgress.length > 0 && (
+          <div className="space-y-3">
             <div className="flex justify-between text-sm">
-              <span>აუდიოს ამოღება მიმდინარეობს...</span>
-              <span>{progress}%</span>
+              <span>საერთო პროგრესი</span>
+              <span>{overallProgress}%</span>
             </div>
-            <Progress value={progress} className="h-2" />
+            <Progress value={overallProgress} className="h-2" />
+            
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {fileProgress.map((fp, index) => (
+                <div key={index} className="flex items-center gap-3 text-sm">
+                  {fp.status === "done" ? (
+                    <CheckCircle className="w-4 h-4 text-green-500" />
+                  ) : fp.status === "extracting" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border border-muted-foreground" />
+                  )}
+                  <span className="truncate flex-1">{fp.file.name}</span>
+                  <span className="text-muted-foreground">{fp.progress}%</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -90,17 +129,17 @@ const AudioExtractor = ({ onClose }: AudioExtractorProps) => {
           size="lg"
           className="w-full"
           onClick={handleExtract}
-          disabled={!file || isExtracting}
+          disabled={files.length === 0 || isExtracting}
         >
           {isExtracting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              ამოღება...
+              ამოღება... ({overallProgress}%)
             </>
           ) : (
             <>
               <Download className="w-4 h-4" />
-              აუდიოს ამოღება
+              {files.length > 0 ? `${files.length} ვიდეოდან აუდიოს ამოღება` : "აუდიოს ამოღება"}
             </>
           )}
         </Button>
